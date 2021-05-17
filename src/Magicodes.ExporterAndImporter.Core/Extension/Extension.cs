@@ -11,11 +11,16 @@
 // 
 // ======================================================================
 
+using Magicodes.ExporterAndImporter.Core.Models;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Data;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 #if NETSTANDARD2_1
 using System.Reflection;
@@ -24,13 +29,11 @@ using System.Reflection.Emit;
 
 namespace Magicodes.ExporterAndImporter.Core.Extension
 {
+    /// <summary>
+    ///     扩展类
+    /// </summary>
     public static class Extension
     {
-        public static bool IsNullOrWhiteSpace(this string str)
-        {
-            return string.IsNullOrWhiteSpace(str);
-        }
-
 #if NETSTANDARD2_1
         /// <summary>
         /// 将集合转成DataTable
@@ -38,11 +41,6 @@ namespace Magicodes.ExporterAndImporter.Core.Extension
         /// <returns></returns>
         public static DataTable ToDataTable<T>(this IEnumerable<T> source)
         {
-            if (source == null)
-            {
-                throw new ArgumentNullException(nameof(source));
-            }
-
             var table = Cache<T>.SchemeFactory();
 
             foreach (var item in source)
@@ -94,7 +92,7 @@ namespace Magicodes.ExporterAndImporter.Core.Extension
                 {
                     generator.Emit(OpCodes.Dup);
                     generator.Emit(OpCodes.Ldstr, propertyInfo.Name);
-                    generator.Emit(OpCodes.Ldtoken, propertyInfo.PropertyType);
+                    generator.Emit(OpCodes.Ldtoken, (propertyInfo.PropertyType.IsGenericType) && (propertyInfo.PropertyType.GetGenericTypeDefinition() == typeof(Nullable<>)) ? propertyInfo.PropertyType.GetGenericArguments()[0] : propertyInfo.PropertyType);
                     // ReSharper disable AssignNullToNotNullAttribute
                     generator.Emit(OpCodes.Call,
                         typeof(Type).GetMethod("GetTypeFromHandle", new[] { typeof(RuntimeTypeHandle) }));
@@ -188,9 +186,10 @@ namespace Magicodes.ExporterAndImporter.Core.Extension
             var props = typeof(T).GetProperties();
             var dt = new DataTable();
             dt.Columns.AddRange(props.Select(p =>
-                new DataColumn(p.PropertyType.GetAttribute<ExporterAttribute>()?.Name ?? p.GetDisplayName() ?? p.Name,
-                    p.PropertyType)).ToArray());
-            if (source.Count <= 0) return dt;
+                new DataColumn(p.Name,
+                    (p.PropertyType.IsGenericType) && (p.PropertyType.GetGenericTypeDefinition() == typeof(Nullable<>))
+                        ? p.PropertyType.GetGenericArguments()[0]
+                        : p.PropertyType)).ToArray());
 
             for (var i = 0; i < source.Count; i++)
             {
@@ -204,5 +203,180 @@ namespace Magicodes.ExporterAndImporter.Core.Extension
         }
 
 #endif
+        /// <summary>
+        ///     将DataTable转List
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="dt"></param>
+        /// <returns></returns>
+        public static IList<T> ToList<T>(this DataTable dt) where T : class
+        {
+            IList<T> list = new List<T>();
+            foreach (DataRow dr in dt.Rows)
+            {
+                T t = Activator.CreateInstance<T>();
+                var props = typeof(T).GetProperties();
+                foreach (var pro in props)
+                {
+                    var tempName = pro.Name;
+                    if (!dt.Columns.Contains(tempName)) continue;
+                    if (!pro.CanWrite) continue;
+                    var value = dr[tempName];
+                    if (value != DBNull.Value)
+                        pro.SetValue(t, value, null);
+                }
+
+                list.Add(t);
+            }
+
+            return list;
+        }
+
+
+        /// <summary>
+        /// 将Bytes导出为Excel文件
+        /// </summary>
+        /// <param name="bytes">字节数组</param>
+        /// <param name="fileName">文件路径</param>
+        /// <returns></returns>
+        public static ExportFileInfo ToExcelExportFileInfo(this byte[] bytes, string fileName)
+        {
+            fileName.CheckExcelFileName();
+            File.WriteAllBytes(fileName, bytes);
+
+            var file = new ExportFileInfo(fileName,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+            return file;
+        }
+
+        /// <summary>
+        /// 将Bytes导出为Csv文件
+        /// </summary>
+        /// <param name="bytes">字节数组</param>
+        /// <param name="fileName">文件路径</param>
+        /// <returns></returns>
+        public static ExportFileInfo ToCsvExportFileInfo(this byte[] bytes, string fileName)
+        {
+            fileName.CheckCsvFileName();
+            File.WriteAllBytes(fileName, bytes);
+
+            var file = new ExportFileInfo(fileName,
+                "text/csv");
+
+            return file;
+        }
+
+        /// <summary>
+        /// 检查文件名
+        /// </summary>
+        /// <param name="fileName"></param>
+        public static void CheckExcelFileName(this string fileName)
+        {
+            if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentNullException("文件名必须填写!", nameof(fileName));
+            if (!Path.GetExtension(fileName).Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException("仅支持导出“.xlsx”，即不支持Excel97-2003!", nameof(fileName));
+            }
+        }
+
+        /// <summary>
+        /// 检查文件名
+        /// </summary>
+        /// <param name="fileName"></param>
+        public static void CheckCsvFileName(this string fileName)
+        {
+            if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("文件名必须填写!", nameof(fileName));
+            if (!Path.GetExtension(fileName).Equals(".csv", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException("仅支持导出“.csv”!", nameof(fileName));
+            }
+        }
+        /// <summary>
+        /// </summary>
+        /// <param name="url"></param>
+        /// <returns></returns>
+        public static Bitmap GetBitmapByUrl(string url)
+        {
+            if (url.StartsWith("https", StringComparison.OrdinalIgnoreCase))
+                System.Net.ServicePointManager.SecurityProtocol = System.Net.SecurityProtocolType.Tls12;
+            var wc = new System.Net.WebClient();
+            return new Bitmap(wc.OpenRead(url));
+        }
+
+        /// <summary>
+        /// 保存图片
+        /// </summary>
+        /// <param name="image"></param>
+        /// <param name="path">path</param>
+        /// <param name="format"></param>
+        /// <returns></returns>
+        public static string Save(this Image image, string path, ImageFormat format)
+        {
+            using (var img = image)
+            {
+                img.Save(path, format);
+            }
+            return path;
+        }
+        /// <summary>
+        ///     图片转base64
+        /// </summary>
+        /// <param name="image"></param>
+        /// <param name="format"></param>
+        /// <returns></returns>
+        public static string ToBase64String(this Image image, ImageFormat format)
+        {
+            using (var ms = new MemoryStream())
+            {
+                image.Save(ms, format);
+                var arr = new byte[ms.Length];
+                ms.Position = 0;
+                ms.Read(arr, 0, (int)ms.Length);
+                ms.Close();
+                return Convert.ToBase64String(arr);
+            }
+        }
+
+        /// <summary>
+        ///     base64转Bitmap
+        /// </summary>
+        /// <param name="base64String"></param>
+        /// <returns></returns>
+        public static Bitmap Base64StringToBitmap(this string base64String)
+        {
+            var bitmapData = Convert.FromBase64String(s: FixBase64ForImage(Image: base64String));
+            var streamBitmap = new MemoryStream(buffer: bitmapData);
+            var bitmap = new Bitmap(original: (Bitmap)Image.FromStream(stream: streamBitmap));
+            return bitmap;
+        }
+
+        private static string FixBase64ForImage(string Image)
+        {
+            var sbText = new System.Text.StringBuilder(Image, Image.Length);
+            sbText.Replace("\r\n", string.Empty);
+            sbText.Replace(" ", string.Empty);
+            return sbText.ToString();
+        }
+
+        /// <summary>
+        ///     获取集合连续数据中最大的
+        /// </summary>
+        /// <param name="numList"></param>
+        /// <returns></returns>
+        public static int GetLargestContinuous(this List<int> numList)
+        {
+            for (int i = 0; i < numList.Count;)
+            {
+                if (numList.Count > i + 1 && numList[i] - numList[i + 1] == 1)
+                {
+                    //忽略
+                }
+
+                return numList[i];
+            }
+
+            return 0;
+        }
     }
 }

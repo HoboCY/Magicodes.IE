@@ -11,13 +11,16 @@
 // 
 // ======================================================================
 
-using System;
-using System.IO;
 using Magicodes.ExporterAndImporter.Core.Models;
 using OfficeOpenXml;
+using System;
+using System.IO;
 
 namespace Magicodes.ExporterAndImporter.Excel.Utility
 {
+    /// <summary>
+    /// Excel辅助类
+    /// </summary>
     public static class ExcelHelper
     {
         /// <summary>

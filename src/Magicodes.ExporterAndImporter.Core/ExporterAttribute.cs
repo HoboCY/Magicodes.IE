@@ -35,5 +35,35 @@ namespace Magicodes.ExporterAndImporter.Core
         ///     正文字体大小
         /// </summary>
         public float? FontSize { set; get; }
+
+        /// <summary>
+        /// 一个Sheet最大允许的行数，设置了之后将输出多个Sheet
+        /// </summary>
+        public int MaxRowNumberOnASheet { get; set; } = 0;
+
+        /// <summary>
+        ///     自适应所有列
+        /// </summary>
+        public bool AutoFitAllColumn { get; set; }
+
+        /// <summary>
+        ///     数据超过此行之后不启用自适应，默认关闭
+        /// </summary>
+        public int AutoFitMaxRows { get; set; }
+
+        /// <summary>
+        ///     作者
+        /// </summary>
+        public string Author { get; set; }
+
+        /// <summary>
+        /// 头部筛选器
+        /// </summary>
+        public Type ExporterHeaderFilter { get; set; }
+
+        /// <summary>
+        /// 是否禁用所有筛选器
+        /// </summary>
+        public bool IsDisableAllFilter { get; set; }
     }
 }
